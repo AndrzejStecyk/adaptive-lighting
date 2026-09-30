@@ -233,16 +233,28 @@ DOCS[CONF_ADAPT_UNTIL_SLEEP] = (
     "transitioning to these values after sunset. 🌙"
 )
 
+CONF_ADAPT_UNTIL_SLEEP_CT_MODE, DEFAULT_ADAPT_UNTIL_SLEEP_CT_MODE = (
+    "transition_until_sleep_ct_mode",
+    "linear",
+)
+DOCS[CONF_ADAPT_UNTIL_SLEEP_CT_MODE] = (
+    "How color-temperature-only lights transition after sunset when "
+    "`transition_until_sleep` is enabled and `sleep_rgb_or_color_temp` is "
+    "`rgb_color`. `linear`: interpolate `min_color_temp` → `sleep_color_temp` "
+    "in Kelvin. `match_rgb`: use the color temperature of the RGB blend that "
+    "RGB lights show at the same moment, so mixed setups look uniform. 🌡️"
+)
+
 CONF_ADAPT_UNTIL_SLEEP_CT_CURVE, DEFAULT_ADAPT_UNTIL_SLEEP_CT_CURVE = (
     "transition_until_sleep_ct_curve",
     1.0,
 )
 DOCS[CONF_ADAPT_UNTIL_SLEEP_CT_CURVE] = (
-    "Only used with `transition_until_sleep` and `sleep_rgb_or_color_temp: "
-    "rgb_color`. Shapes how fast color-temperature-only lights warm up towards "
-    "`sleep_color_temp` compared to the CCT of the RGB blend: `1` follows the "
-    "CCT, `>1` warms up earlier (use if your color-temp lights look colder than "
-    "your RGB lights in the evening), `<1` later. 🌡️"
+    "Only used with `transition_until_sleep_ct_mode: match_rgb`. Calibrates how "
+    "fast color-temperature-only lights warm up towards `sleep_color_temp` "
+    "compared to the CCT of the RGB blend: `1` follows the CCT, `>1` warms up "
+    "earlier (use if your color-temp lights still look colder than your RGB "
+    "lights), `<1` later. 🎛️"
 )
 
 CONF_ADAPT_DELAY, DEFAULT_ADAPT_DELAY = "adapt_delay", 0
@@ -400,6 +412,17 @@ VALIDATION_TUPLES: list[tuple[str, Any, Any]] = [
     ),
     (CONF_SLEEP_TRANSITION, DEFAULT_SLEEP_TRANSITION, VALID_TRANSITION),
     (CONF_ADAPT_UNTIL_SLEEP, DEFAULT_ADAPT_UNTIL_SLEEP, bool),
+    (
+        CONF_ADAPT_UNTIL_SLEEP_CT_MODE,
+        DEFAULT_ADAPT_UNTIL_SLEEP_CT_MODE,
+        selector.SelectSelector(  # type: ignore[arg-type]
+            selector.SelectSelectorConfig(
+                options=["linear", "match_rgb"],
+                multiple=False,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            ),
+        ),
+    ),
     (
         CONF_ADAPT_UNTIL_SLEEP_CT_CURVE,
         DEFAULT_ADAPT_UNTIL_SLEEP_CT_CURVE,

@@ -297,6 +297,7 @@ class SunLightSettings:
     brightness_mode_time_dark: datetime.timedelta
     brightness_mode_time_light: datetime.timedelta
     brightness_mode: Literal["default", "linear", "tanh"] = "default"
+    adapt_until_sleep_ct_mode: Literal["linear", "match_rgb"] = "linear"
     adapt_until_sleep_ct_curve: float = 1.0
     sunrise_offset: datetime.timedelta = datetime.timedelta()
     sunset_offset: datetime.timedelta = datetime.timedelta()
@@ -447,7 +448,7 @@ class SunLightSettings:
             r, g, b = color_temperature_to_rgb(color_temp_kelvin)
             rgb_color = (round(r), round(g), round(b))
         xy_color: tuple[float, float] = color_RGB_to_xy(*rgb_color)
-        if force_rgb_color:
+        if force_rgb_color and self.adapt_until_sleep_ct_mode == "match_rgb":
             # Keep color-temp-only lights on the same perceived trajectory as
             # the RGB blend: derive the CCT from the blended color instead of
             # interpolating in kelvin space, which diverges perceptually from

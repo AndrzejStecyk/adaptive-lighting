@@ -592,6 +592,7 @@ def test_adapt_until_sleep_ct_follows_rgb_blend():
         brightness_mode_time_dark=dt.timedelta(hours=1),
         brightness_mode_time_light=dt.timedelta(hours=1),
         timezone=dt.timezone.utc,
+        adapt_until_sleep_ct_mode="match_rgb",
     )
     date = dt.datetime(2022, 6, 1, tzinfo=dt.timezone.utc)
     sunset = settings.sun.sunset(date.date())
@@ -654,6 +655,7 @@ def test_adapt_until_sleep_ct_curve(curve, expect_warmer):
         "brightness_mode_time_dark": dt.timedelta(hours=1),
         "brightness_mode_time_light": dt.timedelta(hours=1),
         "timezone": dt.timezone.utc,
+        "adapt_until_sleep_ct_mode": "match_rgb",
     }
     plain = SunLightSettings(**kwargs)
     shaped = SunLightSettings(**kwargs, adapt_until_sleep_ct_curve=curve)
@@ -683,3 +685,41 @@ def test_adapt_until_sleep_ct_curve(curve, expect_warmer):
     # endpoints unchanged
     at_sunset = shaped.brightness_and_color(sunset, is_sleep=False)
     assert at_sunset["color_temp_kelvin"] == 3000
+
+
+def test_adapt_until_sleep_ct_mode_linear_is_default_and_unchanged():
+    """The default `linear` mode keeps the historical kelvin interpolation."""
+    settings = SunLightSettings(
+        name="test",
+        astral_observer=location.observer,
+        adapt_until_sleep=True,
+        max_brightness=100,
+        max_color_temp=5500,
+        min_brightness=30,
+        min_color_temp=3000,
+        sleep_brightness=1,
+        sleep_rgb_or_color_temp="rgb_color",
+        sleep_color_temp=1000,
+        sleep_rgb_color=(255, 56, 0),
+        sunrise_time=None,
+        min_sunrise_time=None,
+        max_sunrise_time=None,
+        sunset_time=None,
+        min_sunset_time=None,
+        max_sunset_time=None,
+        brightness_mode_time_dark=dt.timedelta(hours=1),
+        brightness_mode_time_light=dt.timedelta(hours=1),
+        timezone=dt.timezone.utc,
+    )
+    assert settings.adapt_until_sleep_ct_mode == "linear"
+    date = dt.datetime(2022, 6, 1, tzinfo=dt.timezone.utc)
+    sunset = settings.sun.sunset(date.date())
+    _, midnight = settings.sun.noon_and_midnight(date)
+    if midnight < sunset:
+        midnight += dt.timedelta(days=1)
+    moment = sunset + (midnight - sunset) * 0.5
+    result = settings.brightness_and_color(moment, is_sleep=False)
+    assert result["force_rgb_color"]
+    assert result["color_temp_kelvin"] == settings.color_temp_kelvin(
+        result["sun_position"],
+    )
