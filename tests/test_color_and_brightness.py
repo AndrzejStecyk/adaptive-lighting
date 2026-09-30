@@ -11,6 +11,7 @@ from homeassistant.components.adaptive_lighting.color_and_brightness import (
     SunEvents,
     SunLightSettings,
     clamp,
+    color_xy_to_cct,
 )
 
 # Create a mock astral location object (its `.observer` is passed to `SunEvents`)
@@ -547,3 +548,80 @@ def test_brightness_and_color_on_polar_days(date):
     at_midnight = settings.brightness_and_color(midnight, is_sleep=False)
     assert at_midnight["brightness_pct"] == 30
     assert at_midnight["color_temp_kelvin"] == 2000
+
+
+def test_color_xy_to_cct_roundtrip():
+    """CCT derived from a blackbody RGB color must match the original kelvins."""
+    from homeassistant.util.color import (
+        color_RGB_to_xy,
+        color_temperature_to_rgb,
+    )
+
+    for kelvin in (1500, 2000, 2700, 3000, 4000, 5500, 6500):
+        xy = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+        cct = color_xy_to_cct(*xy)
+        assert abs(cct - kelvin) / kelvin < 0.02, (kelvin, cct)
+
+
+def test_adapt_until_sleep_ct_follows_rgb_blend():
+    """With `adapt_until_sleep` and an RGB sleep color, color-temp-only lights
+    must follow the perceived color of the RGB blend (CCT derived from the
+    blended color) instead of a separate linear interpolation in kelvin space,
+    which diverges perceptually from the HSV blend used for `rgb_color` (#624).
+    """
+    from homeassistant.util.color import color_RGB_to_xy
+
+    settings = SunLightSettings(
+        name="test",
+        astral_observer=location.observer,
+        adapt_until_sleep=True,
+        max_brightness=100,
+        max_color_temp=5500,
+        min_brightness=30,
+        min_color_temp=3000,
+        sleep_brightness=1,
+        sleep_rgb_or_color_temp="rgb_color",
+        sleep_color_temp=1000,
+        sleep_rgb_color=(255, 56, 0),
+        sunrise_time=None,
+        min_sunrise_time=None,
+        max_sunrise_time=None,
+        sunset_time=None,
+        min_sunset_time=None,
+        max_sunset_time=None,
+        brightness_mode_time_dark=dt.timedelta(hours=1),
+        brightness_mode_time_light=dt.timedelta(hours=1),
+        timezone=dt.timezone.utc,
+    )
+    date = dt.datetime(2022, 6, 1, tzinfo=dt.timezone.utc)
+    sunset = settings.sun.sunset(date.date())
+    _, midnight = settings.sun.noon_and_midnight(date)
+    if midnight < sunset:
+        midnight += dt.timedelta(days=1)
+
+    previous_kelvin = None
+    seen_forced = 0
+    for fraction in (0.15, 0.3, 0.5, 0.7, 0.9):
+        moment = sunset + (midnight - sunset) * fraction
+        result = settings.brightness_and_color(moment, is_sleep=False)
+        if not result["force_rgb_color"]:
+            continue
+        seen_forced += 1
+        expected_cct = clamp(
+            color_xy_to_cct(*color_RGB_to_xy(*result["rgb_color"])),
+            settings.sleep_color_temp,
+            settings.min_color_temp,
+        )
+        assert abs(result["color_temp_kelvin"] - expected_cct) <= 5, (
+            moment,
+            result,
+        )
+        assert (
+            settings.sleep_color_temp
+            <= result["color_temp_kelvin"]
+            <= settings.min_color_temp
+        )
+        if previous_kelvin is not None:
+            assert result["color_temp_kelvin"] <= previous_kelvin
+        previous_kelvin = result["color_temp_kelvin"]
+    assert seen_forced > 0

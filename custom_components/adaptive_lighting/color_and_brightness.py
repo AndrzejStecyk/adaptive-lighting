@@ -445,9 +445,18 @@ class SunLightSettings:
             color_temp_kelvin = self.color_temp_kelvin(sun_position)
             r, g, b = color_temperature_to_rgb(color_temp_kelvin)
             rgb_color = (round(r), round(g), round(b))
+        xy_color: tuple[float, float] = color_RGB_to_xy(*rgb_color)
+        if force_rgb_color:
+            # Keep color-temp-only lights on the same perceived trajectory as
+            # the RGB blend: derive the CCT from the blended color instead of
+            # interpolating in kelvin space, which diverges perceptually from
+            # the HSV interpolation used for `rgb_color` (see #624).
+            cct = color_xy_to_cct(*xy_color)
+            color_temp_kelvin = 5 * round(
+                clamp(cct, self.sleep_color_temp, self.min_color_temp) / 5,
+            )
         # backwards compatibility for versions < 1.3.1 - see #403
         color_temp_mired: float = math.floor(1000000 / color_temp_kelvin)
-        xy_color: tuple[float, float] = color_RGB_to_xy(*rgb_color)
         hs_color: tuple[float, float] = color_xy_to_hs(*xy_color)
         return {
             "brightness_pct": brightness_pct,
@@ -592,6 +601,42 @@ def lerp_color_hsv(
     rgb = tuple(round(x * 255) for x in colorsys.hsv_to_rgb(*hsv))
     assert all(0 <= x <= 255 for x in rgb), f"Invalid RGB color: {rgb}"
     return cast("tuple[int, int, int]", rgb)
+
+
+def color_xy_to_cct(x: float, y: float) -> float:
+    """Return the correlated color temperature (CCT) in Kelvin for a CIE 1931
+    xy chromaticity.
+
+    The CCT is found as the color temperature whose RGB representation (via
+    `color_temperature_to_rgb`, i.e. the same conversion this component uses
+    to turn a color temperature into an RGB color) is closest to the given
+    chromaticity in the CIE 1960 uv plane, which is how CCT is defined.
+    This stays accurate for saturated colors far below the Planckian locus,
+    where polynomial approximations like McCamy's break down.
+    """
+
+    def _uv(x: float, y: float) -> tuple[float, float]:
+        d = -2 * x + 12 * y + 3
+        return 4 * x / d, 6 * y / d
+
+    u0, v0 = _uv(x, y)
+
+    def _dist_sq(kelvin: float) -> float:
+        xk, yk = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+        uk, vk = _uv(xk, yk)
+        return (u0 - uk) ** 2 + (v0 - vk) ** 2
+
+    # Ternary search in mired space (perceptually uniform) over the range
+    # supported by `color_temperature_to_rgb` (1000-40000 K).
+    lo_mired, hi_mired = 1e6 / 13000, 1e6 / 1000
+    for _ in range(40):
+        m1 = lo_mired + (hi_mired - lo_mired) / 3
+        m2 = hi_mired - (hi_mired - lo_mired) / 3
+        if _dist_sq(1e6 / m1) < _dist_sq(1e6 / m2):
+            hi_mired = m2
+        else:
+            lo_mired = m1
+    return 1e6 / ((lo_mired + hi_mired) / 2)
 
 
 def lerp(x: float, x1: float, x2: float, y1: float, y2: float) -> float:
