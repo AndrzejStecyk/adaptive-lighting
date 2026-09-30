@@ -297,6 +297,7 @@ class SunLightSettings:
     brightness_mode_time_dark: datetime.timedelta
     brightness_mode_time_light: datetime.timedelta
     brightness_mode: Literal["default", "linear", "tanh"] = "default"
+    adapt_until_sleep_ct_curve: float = 1.0
     sunrise_offset: datetime.timedelta = datetime.timedelta()
     sunset_offset: datetime.timedelta = datetime.timedelta()
     timezone: datetime.tzinfo = UTC
@@ -451,10 +452,24 @@ class SunLightSettings:
             # the RGB blend: derive the CCT from the blended color instead of
             # interpolating in kelvin space, which diverges perceptually from
             # the HSV interpolation used for `rgb_color` (see #624).
-            cct = color_xy_to_cct(*xy_color)
-            color_temp_kelvin = 5 * round(
-                clamp(cct, self.sleep_color_temp, self.min_color_temp) / 5,
+            cct = clamp(
+                color_xy_to_cct(*xy_color),
+                self.sleep_color_temp,
+                self.min_color_temp,
             )
+            if self.adapt_until_sleep_ct_curve != 1:
+                # Optional calibration: reshape the progress towards
+                # `sleep_color_temp` in mired space (perceptually uniform), so
+                # that `>1` reaches warm tones earlier and `<1` later.
+                mired_min = 1e6 / self.min_color_temp
+                mired_sleep = 1e6 / self.sleep_color_temp
+                if mired_sleep != mired_min:
+                    progress = (1e6 / cct - mired_min) / (mired_sleep - mired_min)
+                    progress = clamp(progress, 0, 1) ** (
+                        1 / self.adapt_until_sleep_ct_curve
+                    )
+                    cct = 1e6 / (mired_min + progress * (mired_sleep - mired_min))
+            color_temp_kelvin = 5 * round(cct / 5)
         # backwards compatibility for versions < 1.3.1 - see #403
         color_temp_mired: float = math.floor(1000000 / color_temp_kelvin)
         hs_color: tuple[float, float] = color_xy_to_hs(*xy_color)
@@ -604,8 +619,7 @@ def lerp_color_hsv(
 
 
 def color_xy_to_cct(x: float, y: float) -> float:
-    """Return the correlated color temperature (CCT) in Kelvin for a CIE 1931
-    xy chromaticity.
+    """Return the correlated color temperature (CCT) in Kelvin of a CIE 1931 xy.
 
     The CCT is found as the color temperature whose RGB representation (via
     `color_temperature_to_rgb`, i.e. the same conversion this component uses
